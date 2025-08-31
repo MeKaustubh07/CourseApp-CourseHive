@@ -1,0 +1,1 @@
+const { PurchaseModel } = require("../db") ;
