@@ -34,14 +34,13 @@ const Purchase = new Schema({
 
 const Upload = new Schema({
   title: { type: String, required: true },
-  type: { type: String, enum: ["material", "paper"], required: true }, // category
-  fileUrl: { type: String, required: true },
-  viewUrl: { type: String }, // Viewer-friendly URL
-  publicId: { type: String }, // Cloudinary public ID for future operations
-  originalName: { type: String }, // Original filename
-  fileSize: { type: Number }, // File size in bytes
-  mimeType: { type: String }, // File MIME type
-  Admin: { type: mongoose.Schema.Types.ObjectId, ref: "admin", required: true }, // ✅ updated
+  type: { type: String, enum: ["material", "paper"], required: true },
+  fileUrl: { type: String, required: true }, // store Cloudinary's secure_url
+  publicId: { type: String }, // for future delete/transformations
+  originalName: { type: String },
+  fileSize: { type: Number },
+  mimeType: { type: String },
+  Admin: { type: mongoose.Schema.Types.ObjectId, ref: "admin", required: true },
 }, { timestamps: true });
 
 const MaterialModel = mongoose.model("upload", Upload);

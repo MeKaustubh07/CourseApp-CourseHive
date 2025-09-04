@@ -3,7 +3,8 @@ const jwt = require("jsonwebtoken");
 const { userAuthe, JWT_SECRET_USER } = require("../AuthMiddleware/userAuth");
 const bcrypt = require("bcrypt");
 const { z } = require("zod");
-const { UserModel, PurchaseModel, CourseModel } = require("../db"); // Added CourseModel
+const axios = require("axios"); // ✅ needed for file download
+const { UserModel, PurchaseModel, CourseModel , MaterialModel } = require("../db"); // Added CourseModel
 const userRouter = Router();
 
 // --- Signup ---
@@ -393,6 +394,58 @@ userRouter.get("/course/:courseid", userAuthe, async function(req, res) {
     res.status(500).json({ 
       success: false,
       message: "Server error while fetching course details" 
+    });
+  }
+});
+
+// --- 📚 Get All Materials (Public) ---
+userRouter.get("/materials", userAuthe, async (req, res) => {
+  try {
+    const materials = await MaterialModel.find({ type: "material" }).sort({ createdAt: -1 });
+    res.json({ success: true, materials });
+  } catch (error) {
+    console.error("❌ Error fetching materials:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch materials" });
+  }
+});
+
+
+// --- 📄 Get All Papers (Public) ---
+userRouter.get("/papers", userAuthe, async (req, res) => {
+  try {
+    const papers = await MaterialModel.find({ type: "paper" }).sort({ createdAt: -1 });
+    res.json({ success: true, papers });
+  } catch (error) {
+    console.error("❌ Error fetching papers:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch papers" });
+  }
+});
+
+
+// --- ⬇️ Download Material/Paper ---
+userRouter.get("/materials/download/:id", userAuthe, async (req, res) => {
+  try {
+    const material = await MaterialModel.findById(req.params.id);
+
+    if (!material) {
+      return res.status(404).json({ success: false, error: "Material not found" });
+    }
+
+    // ✅ Direct fetch from Cloudinary (public URL)
+    const response = await axios.get(material.fileUrl, { responseType: "arraybuffer" });
+
+    res.set({
+      "Content-Disposition": `attachment; filename="${material.originalName || "file"}"`,
+      "Content-Type": response.headers["content-type"] || "application/octet-stream",
+    });
+
+    res.send(response.data);
+  } catch (err) {
+    console.error("❌ Download error:", err.message);
+    res.status(500).json({
+      success: false,
+      error: "Download failed",
+      details: err.message,
     });
   }
 });

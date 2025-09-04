@@ -411,9 +411,8 @@ adminRouter.post("/materials/upload", adminAuthe, upload.single("file"), async (
     const newUpload = await MaterialModel.create({
       title,
       type,
-      // ✅ Store the correct URL
-      fileUrl: result.secure_url,
-      viewUrl: result.secure_url,
+      // Store only the secure_url
+      fileUrl: result.secure_url,   // ✅ public link, works for preview & download
       publicId: result.public_id,
       originalName: req.file.originalname,
       fileSize: result.bytes,
