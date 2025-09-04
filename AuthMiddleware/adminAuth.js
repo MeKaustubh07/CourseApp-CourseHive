@@ -25,7 +25,6 @@ async function adminAuthe(req, res, next) {
         if (userdetails && userdetails.id) {
             // Convert string ID to ObjectId for proper comparison
             req.userid = new mongoose.Types.ObjectId(userdetails.id);
-            console.log("🔍 Decoded admin ID:", req.userid.toString());
             next();
         } else {
             return res.status(401).json({

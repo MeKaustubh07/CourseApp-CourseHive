@@ -6,6 +6,7 @@ const { z } = require("zod");
 const axios = require("axios"); // ✅ needed for file download
 const { UserModel, PurchaseModel, CourseModel , MaterialModel } = require("../db"); // Added CourseModel
 const userRouter = Router();
+const https = require("https");
 
 // --- Signup ---
 userRouter.post("/signup", async function (req, res) {
@@ -422,31 +423,39 @@ userRouter.get("/papers", userAuthe, async (req, res) => {
 });
 
 
-// --- ⬇️ Download Material/Paper ---
+// --- ⬇️ Download Material/Paper --
+
 userRouter.get("/materials/download/:id", userAuthe, async (req, res) => {
   try {
     const material = await MaterialModel.findById(req.params.id);
-
     if (!material) {
       return res.status(404).json({ success: false, error: "Material not found" });
     }
 
-    // ✅ Direct fetch from Cloudinary (public URL)
-    const response = await axios.get(material.fileUrl, { responseType: "arraybuffer" });
+    // ✅ Set headers before streaming
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${material.originalName || "file.pdf"}"`
+    );
+    res.setHeader("Content-Type", material.mimeType || "application/pdf");
 
-    res.set({
-      "Content-Disposition": `attachment; filename="${material.originalName || "file"}"`,
-      "Content-Type": response.headers["content-type"] || "application/octet-stream",
+    // ✅ Stream directly from Cloudinary to response
+    https.get(material.fileUrl, (cloudRes) => {
+      if (cloudRes.statusCode !== 200) {
+        console.error("Cloudinary stream failed:", cloudRes.statusCode);
+        return res
+          .status(500)
+          .json({ success: false, error: "Cloudinary fetch failed" });
+      }
+      cloudRes.pipe(res);
+    }).on("error", (err) => {
+      console.error("Stream error:", err.message);
+      res.status(500).json({ success: false, error: "Stream failed" });
     });
 
-    res.send(response.data);
   } catch (err) {
     console.error("❌ Download error:", err.message);
-    res.status(500).json({
-      success: false,
-      error: "Download failed",
-      details: err.message,
-    });
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
