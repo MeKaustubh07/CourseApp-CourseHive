@@ -15,7 +15,6 @@ async function userAuthe(req, res, next) {
       const userdetails = jwt.verify(token, JWT_SECRET_USER);
       if (userdetails && userdetails.id) {
         req.userId = userdetails.id; // match your routes that read req.userId
-        console.log('userId', req.userId);
         return next();
       }
   

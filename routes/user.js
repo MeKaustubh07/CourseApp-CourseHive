@@ -7,6 +7,9 @@ const axios = require("axios"); // ✅ needed for file download
 const { UserModel, PurchaseModel, CourseModel , MaterialModel } = require("../db"); // Added CourseModel
 const userRouter = Router();
 const https = require("https");
+const Test = require("../models/Tests");
+const Attempt = require("../models/Attempt");
+const mongoose = require("mongoose");
 
 // --- Signup ---
 userRouter.post("/signup", async function (req, res) {
@@ -458,5 +461,221 @@ userRouter.get("/materials/download/:id", userAuthe, async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+
+// --- 1) List available tests (published) ---
+userRouter.get("/givetests", userAuthe, async (req, res) => {
+  try {
+    const tests = await Test.find({ published: true })
+      .select("title subject durationMinutes totalMarks createdAt description")
+      .sort({ createdAt: -1 });
+
+    return res.json({ success: true, tests });
+  } catch (err) {
+    console.error("givetests error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- 2) Get single test (safe public view) ---
+userRouter.get("/:testId", userAuthe, async (req, res) => {
+  try {
+    const { testId } = req.params;
+    if (!mongoose.isValidObjectId(testId)) {
+      return res.status(400).json({ success: false, message: "Invalid test id" });
+    }
+
+    const test = await Test.findById(testId);
+    if (!test || !test.published) {
+      return res.status(404).json({ success: false, message: "Not found" });
+    }
+
+    const safeQuestions = test.questions.map((q, idx) => ({
+      questionIndex: idx,
+      text: q.text,
+      options: q.options,
+      marks: q.marks || 1,
+    }));
+
+    return res.json({
+      success: true,
+      test: {
+        _id: test._id,
+        title: test.title,
+        description: test.description,
+        subject: test.subject,
+        durationMinutes: test.durationMinutes,
+        totalMarks: test.totalMarks,
+        questions: safeQuestions,
+      },
+    });
+  } catch (err) {
+    console.error("get test error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- 3) Start attempt ---
+userRouter.post("/:testId/start", userAuthe, async (req, res) => {
+  try {
+    const { testId } = req.params;
+    if (!mongoose.isValidObjectId(testId)) {
+      return res.status(400).json({ success: false, message: "Invalid test id" });
+    }
+
+    const test = await Test.findById(testId);
+    if (!test || !test.published) {
+      return res.status(404).json({ success: false, message: "Test not available" });
+    }
+
+    // Optional: enforce allowRetake logic
+    if (!test.allowRetake) {
+      const prev = await Attempt.findOne({
+        testId: test._id,
+        userId: req.userId,
+        status: { $in: ["submitted", "graded", "auto-submitted"] },
+      });
+      if (prev) {
+        return res.status(400).json({
+          success: false,
+          message: "You have already attempted this test and retake not allowed",
+        });
+      }
+    }
+
+    const attempt = await Attempt.create({
+      testId: test._id,
+      userId: req.userId,
+      startedAt: new Date(),
+      maxScore: test.totalMarks,
+      status: "in-progress",
+      answers: [],
+    });
+
+    const safeQuestions = test.questions.map((q, idx) => ({
+      questionIndex: idx,
+      text: q.text,
+      options: q.options,
+      marks: q.marks || 1,
+    }));
+
+    return res.json({
+      success: true,
+      attemptId: attempt._id,
+      startedAt: attempt.startedAt,
+      expiresAt: new Date(Date.now() + test.durationMinutes * 60 * 1000),
+      test: {
+        _id: test._id,
+        title: test.title,
+        description: test.description,
+        durationMinutes: test.durationMinutes,
+        totalMarks: test.totalMarks,
+        questions: safeQuestions,
+      },
+    });
+  } catch (err) {
+    console.error("start attempt error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- 4) Submit attempt ---
+userRouter.post("/:testId/submit", userAuthe, async (req, res) => {
+  try {
+    const { testId } = req.params;
+    const { answers = [], attemptId } = req.body;
+
+    if (!mongoose.isValidObjectId(testId) || !mongoose.isValidObjectId(attemptId)) {
+      return res.status(400).json({ success: false, message: "Invalid id(s)" });
+    }
+
+    const test = await Test.findById(testId);
+    if (!test) return res.status(404).json({ success: false, message: "Test not found" });
+
+    const attempt = await Attempt.findById(attemptId);
+    if (!attempt) return res.status(404).json({ success: false, message: "Attempt not found" });
+    if (attempt.userId.toString() !== req.userId) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+    if (["submitted", "graded"].includes(attempt.status)) {
+      return res.status(400).json({ success: false, message: "Attempt already submitted" });
+    }
+
+    // Time check
+    const started = attempt.startedAt;
+    const allowedMs = test.durationMinutes * 60 * 1000;
+    const now = new Date();
+    const elapsed = now - started;
+    const autoSubmitted = elapsed > allowedMs;
+
+    // Grade
+    let score = 0;
+    const answersOut = [];
+
+    for (let idx = 0; idx < test.questions.length; idx++) {
+      const q = test.questions[idx];
+      const userAns = (answers || []).find((a) => a.questionIndex === idx);
+      const selectedIndex = userAns ? userAns.selectedIndex : null;
+      const isCorrect = selectedIndex !== null && selectedIndex === q.correctIndex;
+      let marksObtained = 0;
+      if (isCorrect) marksObtained = q.marks || 1;
+      else if (selectedIndex !== null && q.negativeMarks) marksObtained = -Math.abs(q.negativeMarks);
+      score += marksObtained;
+      answersOut.push({ questionIndex: idx, selectedIndex, isCorrect, marksObtained });
+    }
+
+    if (score < 0) score = 0;
+
+    attempt.answers = answersOut;
+    attempt.submittedAt = now;
+    attempt.durationTakenSeconds = Math.floor(elapsed / 1000);
+    attempt.score = score;
+    attempt.status = autoSubmitted ? "auto-submitted" : "submitted";
+    await attempt.save();
+
+    return res.json({
+      success: true,
+      score,
+      maxScore: test.totalMarks,
+      attemptId: attempt._id,
+      autoSubmitted,
+    });
+  } catch (err) {
+    console.error("submit attempt error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- 5) Fetch attempt (result) ---
+userRouter.get("/attempt/:attemptId", userAuthe, async (req, res) => {
+  try {
+    const { attemptId } = req.params;
+    if (!mongoose.isValidObjectId(attemptId)) {
+      return res.status(400).json({ success: false, message: "Invalid attempt id" });
+    }
+
+    const attempt = await Attempt.findById(attemptId).lean();
+    if (!attempt) return res.status(404).json({ success: false, message: "Not found" });
+    if (attempt.userId.toString() !== req.userId) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+
+    const test = await Test.findById(attempt.testId).select("title totalMarks").lean();
+    attempt.test = test || null;
+
+    return res.json({ success: true, attempt });
+  } catch (err) {
+    console.error("get attempt error:", err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- 6) Compatibility alias ---
+userRouter.get("/result/:attemptId", userAuthe, async (req, res) => {
+  req.url = `/attempt/${req.params.attemptId}`; // rewrite path
+  return userRouter.handle(req, res);
+});
+
+module.exports = userRouter;
 
 module.exports = userRouter;

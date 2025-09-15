@@ -6,6 +6,8 @@ const { z } = require("zod");
 const mongoose = require("mongoose");
 const axios = require("axios");
 const { AdminModel, CourseModel , MaterialModel } = require("../db");
+const Test = require('../models/Tests');
+const Attempt = require('../models/Attempt');
 
 const adminRouter = Router();
 
@@ -15,7 +17,6 @@ const cloudinary = require("./config/cloudinary");
 /// Use multer memory storage for buffer access
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
-
 
 // Helper function to validate ObjectId (updated)
 const isValidObjectId = (id) => {
@@ -464,6 +465,78 @@ adminRouter.get("/materials/download/:id", adminAuthe, async (req, res) => {
       details: err.message, // send actual error for debugging
     });
   }
+});
+
+//----------Test-Series-------------//
+
+// ✅ FIX 1: Create new test
+adminRouter.post('/managetests', adminAuthe, async (req, res) => {
+  try {
+    const { title, description, subject, durationMinutes, questions, allowRetake } = req.body;
+    if (!title || !durationMinutes || !Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({ success: false, message: 'Missing fields' });
+    }
+    // compute total marks
+    const totalMarks = questions.reduce((s,q) => s + (q.marks || 1), 0);
+    const test = await Test.create({
+      title, description, subject, durationMinutes, questions, totalMarks, createdBy: req.userid, allowRetake
+    });
+    return res.json({ success: true, test });
+  } catch (err) { console.error(err); return res.status(500).json({ success:false, error: err.message }); }
+});
+
+// ✅ FIX 2: Get all tests (admin's tests) - This was missing!
+adminRouter.get('/alltests', adminAuthe, async (req, res) => {
+  try {
+    const tests = await Test.find({ createdBy: req.userid }).sort({ createdAt: -1 });
+    return res.json({ success: true, tests });
+  } catch (err) { 
+    console.error("❌ Error fetching tests:", err); 
+    return res.status(500).json({ success: false, error: err.message }); 
+  }
+});
+
+// ✅ FIX 3: Edit a test (replace fields, questions array)
+adminRouter.put('/tests/:testId', adminAuthe, async (req, res) => {
+  try {
+    const { testId } = req.params;
+    const test = await Test.findOne({ _id: testId, createdBy: req.userid });
+    if (!test) return res.status(404).json({ success:false, message:'Not found' });
+    const { title, description, subject, durationMinutes, questions, published, allowRetake } = req.body;
+    if (questions) test.questions = questions;
+    if (title) test.title = title;
+    if (description) test.description = description;
+    if (subject) test.subject = subject;
+    if (durationMinutes) test.durationMinutes = durationMinutes;
+    if (typeof published === 'boolean') test.published = published;
+    if (typeof allowRetake === 'boolean') test.allowRetake = allowRetake;
+    test.totalMarks = test.questions.reduce((s,q) => s + (q.marks || 1), 0);
+    await test.save();
+    return res.json({ success: true, test });
+  } catch (err) { console.error(err); return res.status(500).json({ success:false, error: err.message }); }
+});
+
+// ✅ FIX 4: Delete test
+adminRouter.delete('/tests/:testId', adminAuthe, async (req, res) => {
+  try {
+    const { testId } = req.params;
+    const deleted = await Test.findOneAndDelete({ _id: testId, createdBy: req.userid });
+    if (!deleted) return res.status(404).json({ success:false, message:'Not found' });
+
+    // 🧹 Delete all attempts related to this test
+    await Attempt.deleteMany({ testId: testId });
+    
+    return res.json({ success:true, message:'Deleted' });
+  } catch (err) { console.error(err); return res.status(500).json({ success:false, error: err.message }); }
+});
+
+// ✅ FIX 5: View attempts for a test (admin)
+adminRouter.get('/tests/:testId/attempts', adminAuthe, async (req, res) => {
+  try {
+    const { testId } = req.params;
+    const attempts = await Attempt.find({ testId }).populate('userId','firstname lastname email').sort({ score: -1 });
+    return res.json({ success: true, attempts });
+  } catch (err) { console.error(err); return res.status(500).json({ success:false, error: err.message }); }
 });
 
 module.exports = adminRouter;
