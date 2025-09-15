@@ -24,6 +24,9 @@ app.use("/api/user", userRouter);
 app.use("/api/admin", adminRouter);
 app.use("/api/courses", courseRouter);
 
+app.get('/RunTest', (req, res) => {
+     res.status(200).json({ status: 'OK' });
+   });
 
 // DB + Server
 async function main() {
