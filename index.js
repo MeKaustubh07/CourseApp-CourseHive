@@ -12,7 +12,7 @@ app.use(express.json());
 
 // Middlewar
 app.use(cors({
-  origin: "https://course-hive-kmp.vercel.app/",
+  origin: "https://course-hive-kmp.vercel.app",
   methods: ["GET", "POST", "PUT", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true
