@@ -539,4 +539,71 @@ adminRouter.get('/tests/:testId/attempts', adminAuthe, async (req, res) => {
   } catch (err) { console.error(err); return res.status(500).json({ success:false, error: err.message }); }
 });
 
+// Add this route after your existing login route
+adminRouter.post("/google-auth", async (req, res) => {
+  try {
+    const { credential } = req.body;
+    
+    if (!credential) {
+      return res.status(400).json({
+        success: false,
+        message: "Google credential is required"
+      });
+    }
+
+    // Decode the JWT token from Google
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.decode(credential);
+    
+    if (!decoded || !decoded.email) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid Google credential"
+      });
+    }
+
+    const { email, given_name, family_name } = decoded;
+
+    // Check if admin already exists
+    let admin = await AdminModel.findOne({ email });
+    
+    if (!admin) {
+      // Create new admin with Google data
+      admin = await AdminModel.create({
+        email,
+        firstName: given_name || "Google",
+        lastName: family_name || "User",
+        password: await bcrypt.hash(Math.random().toString(36), 10) // Random password for Google users
+      });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { userid: admin._id },
+      JWT_SECRET_ADMIN,
+      { expiresIn: "7d" }
+    );
+
+    res.json({
+      success: true,
+      message: "Google authentication successful",
+      token,
+      admin: {
+        id: admin._id,
+        email: admin.email,
+        firstName: admin.firstName,
+        lastName: admin.lastName
+      }
+    });
+
+  } catch (error) {
+    console.error("❌ Google auth error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Google authentication failed",
+      error: error.message
+    });
+  }
+});
+
 module.exports = adminRouter;

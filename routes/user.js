@@ -125,6 +125,72 @@ userRouter.post("/login", async function (req, res) {
   }
 });
 
+// --- Google OAuth Login ---
+userRouter.post("/google-auth", async (req, res) => {
+  try {
+    const { credential } = req.body;
+    
+    if (!credential) {
+      return res.status(400).json({
+        success: false,
+        message: "Google credential is required"
+      });
+    }
+
+    // Decode the JWT token from Google
+    const decoded = jwt.decode(credential);
+    
+    if (!decoded || !decoded.email) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid Google credential"
+      });
+    }
+
+    const { email, given_name, family_name, picture } = decoded;
+
+    // Check if user already exists
+    let user = await UserModel.findOne({ email });
+    
+    if (!user) {
+      // Create new user with Google data
+      user = await UserModel.create({
+        email,
+        firstname: given_name || "Google",
+        lastname: family_name || "User", 
+        password: await bcrypt.hash(Math.random().toString(36), 10) // Random password for Google users
+      });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { id: user._id.toString() },
+      JWT_SECRET_USER,
+      { expiresIn: "7d" }
+    );
+
+    res.json({
+      success: true,
+      message: "Google authentication successful",
+      token,
+      user: {
+        id: user._id,
+        firstName: user.firstname,
+        lastName: user.lastname,
+        email: user.email
+      }
+    });
+
+  } catch (error) {
+    console.error("❌ User Google auth error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Google authentication failed",
+      error: error.message
+    });
+  }
+});
+
 // --- 1. View All Courses (Created by all admins) ---
 userRouter.get("/explore", userAuthe, async function(req, res) {
   try {

@@ -10,13 +10,22 @@ const adminRouter = require("./routes/admin");
 const app = express();
 app.use(express.json());
 
-// Middlewar
+// Enhanced CORS for mobile compatibility
 app.use(cors({
-  origin: "https://course-hive-kmp.vercel.app",
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true
+  origin: ["https://course-hive-kmp.vercel.app", "http://localhost:5174", "http://localhost:3000"],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  credentials: true,
+  optionsSuccessStatus: 200 // For mobile compatibility
 }));
+
+// Add specific headers for mobile OAuth
+app.use((req, res, next) => {
+  res.header('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  res.header('Cross-Origin-Embedder-Policy', 'unsafe-none');
+  next();
+});
+
 app.options("*", cors());
 
 // Routers
